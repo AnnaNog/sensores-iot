@@ -7,7 +7,6 @@ from influxdb_client.client.write_api import SYNCHRONOUS
 from datetime import datetime, timedelta
 from sklearn.ensemble import IsolationForest
 import time
-import json
 import os
 
 # Configuração da página Streamlit
@@ -68,25 +67,28 @@ class AnomalyDetectionApp:
         self.initialize_influxdb()
         
     def generate_sample_data(self, n_samples=100):
-        """Gera dados de exemplo para temperatura e umidade"""
+        """Gera dados de exemplo para temperatura, umidade e pressão"""
         now = datetime.utcnow()
         timestamps = [now - timedelta(minutes=i) for i in range(n_samples)]
         
         # Dados normais
         temp_base = 23.0
         humid_base = 60.0
+        pressure_base = 1013.25
         temperatures = [temp_base + np.random.normal(0, 1) for _ in range(n_samples)]
         humidity = [humid_base + np.random.normal(0, 2) for _ in range(n_samples)]
+        pressure = [pressure_base + np.random.normal(0, 1.5) for _ in range(n_samples)]
         
         # Inserindo algumas anomalias
         anomaly_indices = np.random.choice(n_samples, size=5, replace=False)
         for idx in anomaly_indices:
             temperatures[idx] = temp_base + np.random.normal(0, 5)
             humidity[idx] = humid_base + np.random.normal(0, 10)
+            pressure[idx] = pressure_base + np.random.normal(0, 10)
             
-        return timestamps, temperatures, humidity, anomaly_indices
+        return timestamps, temperatures, humidity, pressure, anomaly_indices
         
-    def write_data(self, timestamps, temperatures, humidity):
+    def write_data(self, timestamps, temperatures, humidity, pressure):
         """Escreve dados no InfluxDB"""
         try:
             for i in range(len(timestamps)):
@@ -94,6 +96,7 @@ class AnomalyDetectionApp:
                     .tag("local", "Fabrica") \
                     .field("temperatura", temperatures[i]) \
                     .field("umidade", humidity[i]) \
+                    .field("pressao", pressure[i]) \
                     .time(timestamps[i])
                 self.write_api.write(
                     bucket=st.session_state.influxdb_config['bucket'],
@@ -128,7 +131,7 @@ class AnomalyDetectionApp:
             return None
             
         # Preparar dados para detecção
-        X = data[['temperatura', 'umidade']].values
+        X = data[['temperatura', 'umidade', 'pressao']].values
         self.model.fit(X)
         
         # Predição (-1 para anomalias, 1 para normais)
@@ -163,8 +166,8 @@ class AnomalyDetectionApp:
         with st.sidebar:
             st.header("Controles")
             if st.button("Gerar e Enviar Dados de Exemplo"):
-                timestamps, temps, humids, anomaly_idx = self.generate_sample_data()
-                if self.write_data(timestamps, temps, humids):
+                timestamps, temps, humids, pressures, anomaly_idx = self.generate_sample_data()
+                if self.write_data(timestamps, temps, humids, pressures):
                     st.success("Dados de exemplo gerados e enviados com sucesso!")
             
             hours = st.slider("Horas de Dados para Análise", 1, 24, 1)
@@ -186,6 +189,10 @@ class AnomalyDetectionApp:
                 # Gráfico de umidade
                 fig_humid = px.line(data, x='_time', y='umidade', title='Umidade ao Longo do Tempo')
                 st.plotly_chart(fig_humid, use_container_width=True)
+                
+                # Gráfico de pressão
+                fig_pressure = px.line(data, x='_time', y='pressao', title='Pressão ao Longo do Tempo')
+                st.plotly_chart(fig_pressure, use_container_width=True)
         
         with col2:
             st.subheader("Detecção de Anomalias")
@@ -201,6 +208,7 @@ class AnomalyDetectionApp:
                         anomaly_data,
                         x='temperatura',
                         y='umidade',
+                        size='pressao',
                         color='anomalia',
                         title='Detecção de Anomalias',
                         color_discrete_map={True: 'red', False: 'blue'}
